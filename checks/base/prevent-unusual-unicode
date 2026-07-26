@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# git-guards' unicode rule, with the mode chosen by what the subject IS.
+#
+# That rule has two modes and the difference between them is load-bearing, so
+# picking one for everything would import the wrong ban half the time:
+#
+#   * a REF is a short name typed in a terminal, and its legitimate vocabulary
+#     is small and nameable -- so it gets the WHITELIST (mode 1), the same one a
+#     commit message gets.
+#   * a BODY is prose, and prose's vocabulary is not nameable: a pull request
+#     legitimately carries emoji in a checklist, box drawing in a diagram and
+#     fullwidth punctuation in CJK text. It gets the INVISIBLE-CHARACTER ban
+#     (mode 2, `--files`) instead -- control, zero-width, bidi-override
+#     (CVE-2021-42574), private-use, and any space that is not U+0020.
+#
+# `CMD_SHIMS_KIND` is what makes that choice possible without guessing from the
+# content, which is why the engine sends it.
+set -uo pipefail
+
+case "${CMD_SHIMS_KIND:-}" in
+    text | ref) ;;
+    *) exit 0 ;;
+esac
+
+HERE="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../../lib/git-guards.sh
+. "$HERE/../../lib/git-guards.sh"
+
+git_guards_need_python prevent-unusual-unicode || exit 0
+
+script="$(git_guards_script prevent-unusual-unicode-in-files.py)" || {
+    git_guards_missing prevent-unusual-unicode
+    exit 0
+}
+
+# The rule reads a file, so the subject becomes one. It is named after the
+# command and the kind because the rule prints the path it found the character
+# in, and `gh-text` is a reason somebody can act on where `tmp.XmQ4a1` is not.
+dir="$(mktemp -d)" || exit 0
+trap 'rm -rf "$dir"' EXIT
+file="$dir/${CMD_SHIMS_COMMAND:-cmd}-${CMD_SHIMS_KIND}"
+cat > "$file"
+
+# The rule prints its denominator -- "N file(s) scanned" -- because there it
+# enumerates a whole tree and a scan that covered nothing must be tellable from
+# a clean one. Here the denominator is always the one file this script just
+# wrote, so on a pass the line says nothing the shim does not already say
+# better; on a refusal it is kept, because then it is context for the reason.
+if [ "${CMD_SHIMS_KIND}" = ref ]; then
+    "$script" "$file" > "$dir/said"
+else
+    "$script" --files "$file" > "$dir/said"
+fi
+rc=$?
+
+if [ "$rc" != 0 ]; then
+    cat "$dir/said" >&2
+    git_guards_refused prevent-unusual-unicode
+fi
+exit "$rc"

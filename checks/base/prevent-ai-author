@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# git-guards' `prevent-ai-author`, over a body instead of a commit message.
+#
+# git-guards blocks the trailers at commit-msg, and its README tells you to set
+# `attribution.commit` and `attribution.pr` in Claude Code so they are never
+# written. The gap between those two is this one: `attribution.pr` is a setting
+# in a file on the machine that happens to be running the agent, and nothing
+# enforces it. A pull request body carrying `Generated with [Claude Code]`
+# reaches a public repository without meeting a hook, because there is no hook
+# on that path -- which is the whole reason this repository exists.
+#
+# `text` only. A branch name cannot carry a trailer, and a file tree's
+# attribution is its commit history, which commit-msg already owns.
+set -uo pipefail
+
+case "${CMD_SHIMS_KIND:-}" in
+    text) ;;
+    *) exit 0 ;;
+esac
+
+HERE="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../../lib/git-guards.sh
+. "$HERE/../../lib/git-guards.sh"
+
+script="$(git_guards_script prevent-ai-author.sh)" || {
+    git_guards_missing prevent-ai-author
+    exit 0
+}
+
+# Passed as a real file, so the rule never reaches its commit-msg fallback and
+# judges the body it was handed rather than whatever this checkout was last
+# committing.
+dir="$(mktemp -d)" || exit 0
+trap 'rm -rf "$dir"' EXIT
+file="$dir/${CMD_SHIMS_COMMAND:-cmd}-body"
+cat > "$file"
+
+"$script" "$file"
+rc=$?
+
+[ "$rc" = 0 ] || git_guards_refused prevent-ai-author
+exit "$rc"

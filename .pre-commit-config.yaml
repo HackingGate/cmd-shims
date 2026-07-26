@@ -1,0 +1,27 @@
+default_install_hook_types:
+  - pre-commit
+  - pre-merge-commit
+  - pre-push
+  - commit-msg
+
+repos:
+  - repo: https://github.com/HackingGate/git-guards
+    rev: v1.0.0
+    hooks:
+      - id: prevent-ai-author
+      - id: prevent-author-mismatch
+      - id: prevent-unusual-unicode
+      - id: no-private-repo-names
+      - id: no-private-repo-names-staged
+      - id: prevent-public-push
+      - id: no-local-merge
+      - id: no-merge-commit
+
+  - repo: local
+    hooks:
+      - id: shim-tests
+        name: shim behaviour tests (all commands)
+        entry: tests/run-all.sh
+        language: script
+        pass_filenames: false
+        always_run: true

@@ -1,0 +1,10 @@
+.agents/
+.antigravitycli/
+.claude/
+.codex/
+# checks/ is where a machine puts the checkers it runs, and those are nobody
+# else's business. checks/base/ is the opposite -- the bundled set, shipped and
+# off until named -- so it is tracked.
+checks/*
+!checks/README.md
+!checks/base/

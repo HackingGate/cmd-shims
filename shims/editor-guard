@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# The editor a command opens for a title or body, with a checkpoint after it
+# closes.
+#
+# A shim installs this as the command's own editor variable -- GH_EDITOR,
+# GLAB_EDITOR, whatever the spec names -- when a publishing invocation carries
+# no body in argv. That case is not an edge: it is how most bodies are actually
+# written, and it is the only one where the text never becomes an argument at
+# all.
+#
+# It runs whatever editor the user really has, then reads back the file they
+# just wrote and consults the same checkers the shim would have. Exiting
+# non-zero makes the command abandon what it was doing, which is the contract
+# git already gives a commit-msg hook.
+set -uo pipefail
+
+SHIM_SELF="${BASH_SOURCE[0]}"
+SHIM_ROOT="$(cd -- "$(dirname -- "$(readlink -f -- "$SHIM_SELF")")/.." && pwd)"
+SHIM_NAME="${SHIM_NAME:-editor-guard}"
+SHIM_CHECKS_DIR="${SHIM_CHECKS_DIR:-$SHIM_ROOT/checks}"
+export SHIM_NAME SHIM_CHECKS_DIR SHIM_ROOT
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/shim.sh
+. "$SHIM_ROOT/lib/shim.sh"
+
+file="${1:-}"
+editor="${CMD_SHIMS_REAL_EDITOR:-vi}"
+
+# The editor is a command line, not a path: `code --wait` and `emacsclient -nw`
+# are both ordinary values, so it is deliberately not quoted as one word.
+# shellcheck disable=SC2086
+$editor "$file" || exit $?
+
+[ -f "$file" ] || exit 0
+
+shim_check_text "$(cat "$file")"
+case $? in
+    0) exit 0 ;;
+    2) shim_warn_no_checkers; exit 0 ;;
+    *)
+        printf '\n%s: refused, so the command will abandon this.\n' "$SHIM_NAME" >&2
+        printf '%*s Your text is still in %s\n' "${#SHIM_NAME}" "" "$file" >&2
+        exit 1 ;;
+esac

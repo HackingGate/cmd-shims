@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# git-guards' `no-private-repo-names`, on the paths git hooks cannot reach.
+#
+# The rule is not here. git-guards ships it with a `--text` mode written for
+# this exact caller: "a pull request body is typed into a CLI and goes straight
+# to a public API without passing a single hook; so does an issue title, a
+# release note and a branch name."  This is the thing that calls it.
+#
+# `--text` deliberately does not ask whether the CURRENT repository is public,
+# because the caller already decided that -- and the caller here is
+# `spec_in_scope`, which asked the forge about the repository the text is going
+# TO rather than the checkout it is being written from.
+set -uo pipefail
+
+# `argv` is included for specs that hand over the whole command line: a private
+# name is as published in a flag value the spec does not know about as in one
+# it does.
+case "${CMD_SHIMS_KIND:-}" in
+    text | ref | argv) ;;
+    *) exit 0 ;;
+esac
+
+HERE="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../../lib/git-guards.sh
+. "$HERE/../../lib/git-guards.sh"
+
+script="$(git_guards_script no-private-repo-names.sh)" || {
+    git_guards_missing no-private-repo-names
+    exit 0
+}
+
+# The subject is already on our stdin; `-` is git-guards' spelling for that.
+"$script" --text -
+rc=$?
+
+[ "$rc" = 0 ] || git_guards_refused no-private-repo-names
+exit "$rc"

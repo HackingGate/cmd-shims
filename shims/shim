@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# The shim. There is one, for every command.
+#
+# It takes its identity from the name it was invoked as: `~/.local/bin/gh`,
+# `~/.local/bin/npm` and `~/.local/bin/deploybot` are three symlinks to this
+# file, and each loads the spec matching its own name. A per-command shim file
+# would be a per-command place for the twentieth command to differ from the
+# first, and there is nothing in here that could legitimately differ.
+set -uo pipefail
+
+SHIM_SELF="${BASH_SOURCE[0]}"
+SHIM_NAME="${CMD_SHIMS_NAME:-$(basename -- "$0")}"
+SHIM_ROOT="$(cd -- "$(dirname -- "$(readlink -f -- "$SHIM_SELF")")/.." && pwd)"
+SHIM_CHECKS_DIR="${CMD_SHIMS_CHECKS_DIR:-$SHIM_ROOT/checks}"
+export SHIM_NAME SHIM_CHECKS_DIR SHIM_SELF SHIM_ROOT
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/shim.sh
+. "$SHIM_ROOT/lib/shim.sh"
+
+# Invoked as `shim` rather than through a symlink: nothing to stand in front of.
+if [ "$SHIM_NAME" = shim ]; then
+    printf 'cmd-shims: this is installed under the name of the command it guards.\n' >&2
+    printf '           ./install.sh <command>   (available: %s)\n' \
+        "$("$SHIM_ROOT/install.sh" --list 2>/dev/null | tr '\n' ' ')" >&2
+    exit 2
+fi
+
+shim_load_spec "$SHIM_NAME" "$@"
+engine_main "$SHIM_NAME" "$@"
