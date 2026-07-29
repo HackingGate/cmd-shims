@@ -24,6 +24,7 @@ What refuses. Bundled in [`checks/base/`](checks/base), and **off until named**.
 | [`no-private-repo-names`](checks/base/no-private-repo-names) | `text` `ref` `argv` | git-guards `no-private-repo-names.sh --text` |
 | [`prevent-unusual-unicode`](checks/base/prevent-unusual-unicode) | `text` `ref` | git-guards `prevent-unusual-unicode-in-files.py` |
 | [`prevent-ai-author`](checks/base/prevent-ai-author) | `text` | git-guards `prevent-ai-author.sh` |
+| [`no-os-identity`](checks/base/no-os-identity) | `text` `ref` `argv` | rg-policy `check_policy.py --check-text` |
 
 A kind is what the engine says a subject *is*: `text` is prose, `ref` a branch
 or tag name, `path` a file tree, `argv` the whole command line.
@@ -39,11 +40,18 @@ no-private-repo-names
 prevent-unusual-unicode
 ```
 
-Rule bodies belong in git-guards, so these hold none. Each is an adapter: it
-decides whether the subject it was handed is the kind its rule judges, and hands
-it to the script that already holds that rule. They carry the **same names as
-the git-guards hook ids**, because two tiers running one rule under two names is
-how they start disagreeing.
+Rule bodies belong in the repository that owns the rule — git-guards for what
+git does, rg-policy for what the running host is — so these hold none. Each is
+an adapter: it decides whether the subject it was handed is the kind its rule
+judges, and hands it to the script that already holds that rule. They carry the
+**same names as the hook ids or rule ids upstream**, because two tiers running
+one rule under two names is how they start disagreeing.
+
+Every rule body reachable from here answers to the same calling convention:
+subject on stdin (or a file), exit `0` clean, `1` refused, `2` could not look.
+That is the whole seam — `no-private-repo-names.sh --text -` and
+`check_policy.py --check-text -` are the same shape on purpose, so adding a
+third tier never means writing a fourth copy of a rule.
 
 They ship off for the reason rg-policy ships `policy/base/*.toml` behind
 `extends` and git-guards ships its hook scripts behind a list of ids: nothing
@@ -69,6 +77,17 @@ trailers at `commit-msg` and tells you to set `attribution.pr` in your agent —
 but that is a setting in a file on whichever machine is running the agent, and
 nothing enforces it. A body carrying `Generated with [Claude Code]` reaches a
 public repository without meeting a hook, because on that path there is none.
+
+`no-os-identity` is the one whose rule body is rg-policy rather than git-guards,
+and it closes a gap that is easy to miss precisely because the other tier looks
+like it covers it. rg-policy scans the working tree, so a repository can be
+clean of the operator's username, home path and hostname while the pull request
+explaining *how it was cleaned* names them — and that body is published the
+moment it is written. Editing it afterwards does not undo it, because a forge
+keeps the edit history, publicly. The rules applied are whichever the repository
+you are standing in declares; where it declares none, rg-policy falls back to
+its built-in identity rule, so a superproject with no policy file of its own is
+still covered.
 
 ### Enabling
 
