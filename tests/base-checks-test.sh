@@ -271,12 +271,72 @@ else
     printf 'skip prevent-unusual-unicode (no python3)\n'
 fi
 
-# ---- and with git-guards nowhere on the machine ------------------------------
+# ---- no-os-identity, whose rule body is rg-policy rather than git-guards -----
+# A stub engine, for the same reason as the others: the real one reads the
+# running machine's own identity, so a suite built on it would assert something
+# different on every host.
+mkdir -p "$tmp/rgp"
+cat > "$tmp/rgp/check_policy.py" <<'RGP'
+#!/usr/bin/env bash
+{ printf 'ARGS:'; printf ' %s' "$@"; printf '\n'; } >> "$GG_LOG"
+grep -q 'example-host' && { echo "policy check failed: hostname-segment" >&2; exit 1; }
+exit 0
+RGP
+chmod +x "$tmp/rgp/check_policy.py"
+
+check_rgp() {
+    local kind="$1" text="$2"
+    : > "$GG_LOG"
+    printf '%s' "$text" | CMD_SHIMS_KIND="$kind" CMD_SHIMS_COMMAND=gh \
+        CMD_SHIMS_RG_POLICY="$tmp/rgp" "$base/no-os-identity" \
+        >"$tmp/out" 2>"$tmp/err"
+}
+
+if command -v python3 >/dev/null 2>&1; then
+    check_rgp text 'the example-host fragment of its hostname'
+    eq    "no-os-identity: refuses what rg-policy refuses" "$?" 1
+    ok_if "no-os-identity: calls the engine in --check-text mode" \
+        grep -qx 'ARGS: --check-text -' "$GG_LOG"
+    ok_if "no-os-identity: says which rule refused, and over what" \
+        said 'rg-policy rule no-os-identity, run here over text from gh'
+
+    check_rgp text 'a body that names nobody'
+    eq "no-os-identity: passes what rg-policy passes" "$?" 0
+
+    check_rgp ref 'fix/example-host-outage'
+    ok_if "no-os-identity: judges a ref too" grep -q 'ARGS:' "$GG_LOG"
+
+    check_rgp path "$tmp/work"
+    eq     "no-os-identity: a path is rg-policy's own file mode, not this" "$?" 0
+    not_if "no-os-identity: and it does not call the engine" grep -q 'ARGS:' "$GG_LOG"
+
+    # 2 is rg-policy saying it could not run -- no ripgrep, unreadable policy.
+    # That is an infrastructure answer, not a verdict, and must not read as one.
+    cat > "$tmp/rgp/check_policy.py" <<'RGP'
+#!/usr/bin/env bash
+echo "policy check failed: ripgrep executable \`rg\` was not found" >&2
+exit 2
+RGP
+    chmod +x "$tmp/rgp/check_policy.py"
+    check_rgp text 'anything at all'
+    eq    "no-os-identity: an engine that could not run does not refuse" "$?" 0
+    ok_if "no-os-identity: and says nothing was inspected" \
+        said 'could not run, so nothing was inspected'
+else
+    printf 'skip no-os-identity (no python3)\n'
+fi
+
+# ---- and with the rule bodies nowhere on the machine ------------------------
 # Fail open, but never quietly: a checker that cannot reach its rule has not
 # found the text clean, it has not looked.
 printf 'see acme/secret' | CMD_SHIMS_KIND=text \
     "$base/no-private-repo-names" 2>"$tmp/err"
 eq    "no git-guards: does not refuse" "$?" 0
 ok_if "no git-guards: says nothing was inspected" said 'git-guards is not on this machine'
+
+printf 'anything' | CMD_SHIMS_KIND=text HOME="$tmp/nowhere" \
+    "$base/no-os-identity" 2>"$tmp/err"
+eq    "no rg-policy: does not refuse" "$?" 0
+ok_if "no rg-policy: says nothing was inspected" said 'rg-policy is not on this machine'
 
 harness_report base-checks

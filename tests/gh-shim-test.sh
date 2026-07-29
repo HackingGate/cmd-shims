@@ -133,4 +133,46 @@ CMD_SHIMS_REAL_EDITOR="$tmp/clean-editor" SHIM_CHECKS_DIR="$tmp/checks" \
     "$ROOT/shims/editor-guard" "$tmp/msg2.txt" >/dev/null 2>&1
 eq "editor-guard accepts a clean body" "$?" 0
 
+# ---- the real no-os-identity check, end to end ------------------------------
+# The cases above use a checker the suite owns, which proves the shim's
+# plumbing. This one runs the check that actually ships, through the real shim,
+# against the shape of body that caused it to be written: a pull request
+# explaining a hostname leak, which names the hostname while doing so.
+#
+# The engine is stubbed for the usual reason -- the real one reads whichever
+# machine the suite is running on -- but everything between the command line and
+# it is real.
+if command -v python3 >/dev/null 2>&1; then
+    mkdir -p "$tmp/rgp"
+    cat > "$tmp/rgp/check_policy.py" <<'RGP'
+#!/usr/bin/env bash
+grep -q 'example-host' && { echo "policy check failed: hostname-segment" >&2; exit 1; }
+exit 0
+RGP
+    chmod +x "$tmp/rgp/check_policy.py"
+    ln -sf "$ROOT/checks/base/no-os-identity" "$tmp/checks/no-os-identity"
+    export CMD_SHIMS_RG_POLICY="$tmp/rgp"
+
+    run pr create --title 'Pin the policy' \
+        --body 'the example-host fragment of the hostname was in the fixtures'
+    eq     "no-os-identity: the leaking body is refused" "$rc" 1
+    not_if "no-os-identity: and gh never sees it" reached
+
+    run pr create --title 'Pin the policy' \
+        --body 'a fragment of a workstation hostname was in the fixtures'
+    eq    "no-os-identity: the scrubbed body goes through" "$rc" 0
+    ok_if "no-os-identity: and reaches gh" reached
+
+    # The title is text too. A body can be scrubbed while the subject line --
+    # written first and thought about least -- still names the machine.
+    run pr create --title 'Keep example-host out of fixtures' --body 'ordinary'
+    eq     "no-os-identity: a leaking title is refused too" "$rc" 1
+    not_if "no-os-identity: and gh never sees that either" reached
+
+    rm -f "$tmp/checks/no-os-identity"
+    unset CMD_SHIMS_RG_POLICY
+else
+    printf 'skip no-os-identity end-to-end (no python3)\n'
+fi
+
 harness_report gh-shim

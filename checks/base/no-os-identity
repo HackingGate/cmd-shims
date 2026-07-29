@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# rg-policy's running-host identity rules, on the paths a repository scan cannot
+# reach.
+#
+# The rule is not here. rg-policy holds it -- the username, home path, hostname
+# and the identifying parts of the hostname are read from the running machine at
+# runtime -- and it ships a `--check-text` mode written for this exact caller.
+#
+# The gap it closes is a real one and not hypothetical. rg-policy scans the
+# working tree, so a repository can be clean of the operator's hostname while a
+# pull request body describing *why it was cleaned* names it, and that body
+# reaches a public API without passing a single hook. Editing it afterwards does
+# not help: a forge keeps the edit history, publicly.
+#
+# `text` and `argv`. `ref` too: a branch cut from a machine name carries it just
+# as far. `path` is left to rg-policy's own file mode, which already owns trees.
+set -uo pipefail
+
+case "${CMD_SHIMS_KIND:-}" in
+    text | ref | argv) ;;
+    *) exit 0 ;;
+esac
+
+HERE="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../../lib/rg-policy.sh
+. "$HERE/../../lib/rg-policy.sh"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../../lib/git-guards.sh
+. "$HERE/../../lib/git-guards.sh"
+
+engine="$(rg_policy_engine)" || {
+    rg_policy_missing no-os-identity
+    exit 0
+}
+
+# rg-policy's engine is python3, and an exec failure is a non-zero exit -- which
+# to the shim means REFUSED. A machine without python3 would start refusing
+# commands for a reason that has nothing to do with the text.
+git_guards_need_python no-os-identity || exit 0
+
+# The subject is already on our stdin; `-` is rg-policy's spelling for that.
+# The rules applied are whichever the *current* repository declares, because the
+# engine resolves policy from the working directory -- and that is the right
+# answer, since the text was written about this repository. Where none are
+# declared the engine falls back to its built-in identity rule, so a
+# superproject with no policy file of its own is still covered.
+"$engine" --check-text -
+rc=$?
+
+# 2 is an infrastructure answer, not a verdict -- no ripgrep, unreadable policy.
+# Treat it the way a missing rule body is treated: say so, do not refuse.
+if [ "$rc" = 2 ]; then
+    printf 'cmd-shims: no-os-identity: rg-policy could not run, so nothing was inspected.\n' >&2
+    exit 0
+fi
+
+[ "$rc" = 0 ] || rg_policy_refused no-os-identity
+exit "$rc"
